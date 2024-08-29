@@ -8,7 +8,7 @@ rootLog = Logger().get()
 # rootLog.level = logging.DEBUG
 
 class vmdelta():
-  STAGE='prd'
+  STAGE='dev'
 
   def __init__(self, vargs):
     self.action=vargs[0] if len(vargs) > 0 else "sync" # default
