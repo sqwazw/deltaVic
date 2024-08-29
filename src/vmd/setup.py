@@ -3,9 +3,9 @@ from dataman import DB, ApiUtils
 from dataman import LyrReg
 
 class Setup():
-  def __init__(self, configgy):
-    self.configgy = configgy
-    self.cfg = configgy.cfg['dev']
+  def __init__(self, configgy, stage):
+    self.configgy = configgy # needed for the .write(). self.cfg.meta.write()??
+    self.cfg = configgy.cfg[stage]
     self.db = None
     self.dbSchemas = None
 
@@ -46,7 +46,7 @@ class Setup():
     # check db has vm_delta schema, if not create and add layer_registry
     if 'vm_delta' not in self.dbSchemas:
       self.db.createSch('vm_delta')
-    if 'layer_registry' not in self.db.getSchTbls('vm_delta'):
+    if 'layer_registry' not in self.db.getTables('vm_delta'):
       with open('layer_registry.sql', 'r') as file:
         createStmt = file.read()
         # logging.info(f"file: {createStmt}")
@@ -79,16 +79,16 @@ class Setup():
     logging.info(f"Retrieved {len(rsp)}")
     
     # insert the records that don't exist yet
-    _existingKeys = [d.schTbl for d in self.db.getRecSet(LyrReg)]
+    _existingKeys = [d.identity for d in self.db.getRecSet(LyrReg)]
     for d in dsets:
-      if d.schTbl not in _existingKeys:
+      if d.identity not in _existingKeys:
         d.sup_ver=-1 # new record gets a negative supply-id so it matches the latest seed.
         self.db.execute(*d.insSql())
 
   def createVicmapSchemas(self):
     # check db has all vicmap schemas
     _dsets = self.db.getRecSet(LyrReg)
-    _schemas = set([d.schTbl.split('.')[0] for d in _dsets])
+    _schemas = set([d.identity.split('.')[0] for d in _dsets])
     logging.info(_schemas)
     [self.db.createSch(sch) for sch in _schemas if sch not in self.dbSchemas]
     

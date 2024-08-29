@@ -82,7 +82,7 @@ class FileUtils():
 class Logger():
   @staticmethod
   def get():
-    log_formatter = logging.Formatter('[%(levelname)s] - %(message)s')
+    log_formatter = logging.Formatter('%(asctime)s[%(levelname)s]  %(message)s') # - %(name)s -
     _rootLog = logging.getLogger()
     _rootLog.level = logging.INFO
     try: # on aws the getLOgger command get a handler automatically

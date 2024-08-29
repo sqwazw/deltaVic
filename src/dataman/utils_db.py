@@ -63,8 +63,9 @@ class PGClient():
           logging.debug("Adding {0} to PATH".format(pgsql_dir_bin))
           os.environ["PATH"] = "{0}:{1}".format(os.environ['PATH'], pgsql_dir_bin)
     else:
-        sys.path.append(self.dbClientPath) # use this, from the config file to pg_dump & pg_restore.
-        # print(sys.path)
+        # sys.path.append(self.dbClientPath) # use this, from the config file to pg_dump & pg_restore.
+        os.environ["PATH"] += os.pathsep + self.dbClientPath
+        # logging.debug(f"sysPath: {sys.path}")
       
   def create_credential(self):
     """Creates a pg credential file to connect to the database."""
@@ -93,6 +94,7 @@ class PGClient():
 
   def restore_file(self, file: str): # used in λ.VML_restore.restore()
     """imports a table from a pgdump file"""
+    """pg_restore --host=localhost --port=5432 --dbname=vicmap --username=vicmap --clean --if-exists --no-owner --no-privileges --no-acl --no-security-labels --no-tablespaces  vmreftab.hy_substance_extracted"""
     command_parts = ["pg_restore"]
     command_parts.extend(self.db.getConnArgs())
     command_parts.extend(["--clean", "--if-exists", "--no-owner", "--no-privileges", "--no-acl", "--no-security-labels", "--no-tablespaces"])
@@ -181,10 +183,10 @@ class DB():
 
   def rows(self, sqlStr, params=None):
     result = self.execute(sqlStr, params)
-    return result or None
+    return result or []
   def row(self, sqlStr, params=None):
     result = self.execute(sqlStr, params)
-    return result[0] if result else None
+    return result[0] if result else []
   def item(self, sqlStr, params=None):
     result = self.execute(sqlStr, params)
     return result[0][0] if result else None
@@ -200,8 +202,8 @@ class DB():
   def createSch(self, sch):
     self.execute(f"CREATE SCHEMA IF NOT EXISTS {sch}")
   
-  def getSchTbls(self, schema:str):
-    """ get all table  names from a table """
+  def getTables(self, schema:str):
+    """ get all table names from a schema """
     sqlStr = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema}'"
     data = self.rows(sqlStr)
     return [t[0] for t in data] if data else []# return a list of the table names
@@ -225,6 +227,11 @@ class DB():
     else:
       raise Exception("Could not get table stats for {}. Does it exist?".format(tblQual))
   
+  def analVac(self, ident): # analyze and vaccuume
+    logging.debug(f"{ident}: Analysing and Vaccuuming")
+    self.execute(f"analyze {ident}") # vmadd.address=14seconds
+    self.execute(f"vacuum {ident}") # vmadd.address=12seconds
+    
   ###########################################################################
   def table_exists(self, tblQual:str):
     """ Check table or view exists """        
@@ -232,6 +239,10 @@ class DB():
     field_name_list, data, message = self.execute(sqlStr)
     return True if len(data) > 0 else False
 
+  def dropTable(self, tblQual:str):
+    logging.debug(f"Dropping table {tblQual}")
+    self.execute(f"DROP TABLE IF EXISTS {tblQual} CASCADE") # don't require return values
+    
   def columnExists(self, tblQual:str, tblCol:str):
     return True if tblCol in self.getAllCols(tblQual) else False
 
