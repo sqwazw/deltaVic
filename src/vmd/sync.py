@@ -1,5 +1,5 @@
 import os, logging, traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dataman import LyrReg, ApiUtils, PGClient, Supplies, FU
 
@@ -22,23 +22,37 @@ class Synccer():
     self.tables = [ll for ll in _layers if ll.relation=='table']
     # self.tables = [tt for tt in self.tables if tt.identity.startswith('vmreftab')]#[0:1] # use to dither candidates.
     self.views = [ll for ll in _layers if ll.relation=='view']
-    logging.info(f'To Process: {len(self.tables)} table and {len(self.views)} views')
-    return len(self.tables) + len(self.views)
+    
+    if _nmbr := len(self.tables) + len(self.views):
+      logging.info(f'To Process: {len(self.tables)} table and {len(self.views)} views')
+    return _nmbr
   
   def resolve(self):
-    _local, _remote = {}, {}
-    # Note, only compare those datasets present locally as active and in a complete state and not in err.
-    [_local.update({d.identity:d}) for d in self.db.getRecSet(LyrReg) if d.active and d.status==LyrReg.COMPLETE and not d.err]
+    _local, _errs, _remote = {}, {}, {}
+    [_local.update({d.identity:d}) for d in self.db.getRecSet(LyrReg) if  not d.err]
+    [_errs.update({d.identity:d}) for d in self.db.getRecSet(LyrReg) if d.err]
     [_remote.update({ll.identity:ll}) for ll in self.getVicmap()]
-    logging.info(f"Retrieved layers: {len(_local)} locally, {len(_remote)} from vicmap_master")
+    logging.info(f"Layer state: {len(_local)} locally, {len(_errs)} errors, {len(_remote)} from vicmap_master")
 
+    # scroll thorugh the remote datasets and add any that don't exist locally
+    logging.info("checking remote layers exist locally")
+    for name, dset in _remote.items():
+      if not (_lyr := _local.get(name) or _errs.get(name)):
+      # if name not in list(_local.keys()).extend(list(_errs.keys())):
+        dset.sup_ver=-1 # new record gets a negative supply-id so it matches the latest seed.
+        self.db.execute(*dset.insSql())
+
+    # scroll through the local datasets and set to queued if versions don't match
+    logging.info("checking local layers against remote")
     for name,lyr in _local.items():
       if not (_vmLyr := _remote.get(name)):
-        logging.warning(f"No version of {name} existed in the remote datasets") # auto delete in qa at end?
+        logging.warning(f"No version of {name} exists in the vicmap_master") # auto delete? in qa at start/end?
         continue
-      if lyr.sup_ver != _vmLyr.sup_ver:
-        # logging.debug(f"{lyr.sup_ver}, {_vmLyr.sup_ver}")
-        self.db.execute(*lyr.upStatusSql(LyrReg.QUEUED))
+      # Note conditions: only compare those datasets present locally as active, in a complete state and not in err.
+      if lyr.active and lyr.status == LyrReg.COMPLETE:
+        if lyr.sup_ver != _vmLyr.sup_ver:
+          # logging.debug(f"{lyr.sup_ver}, {_vmLyr.sup_ver}")
+          self.db.execute(*lyr.upStatusSql(LyrReg.QUEUED))
 
   def getVicmap(self):#seedDsets(self):
     # get full list of datasets
@@ -47,12 +61,15 @@ class Synccer():
     return [LyrReg(d) for d in rsp['datasets']]
     
   def run(self):
+    tracker = {}#{"queued":0,"download":0,"restore":0,"delete":0,"add":0,"reconcile":0,"clean":0}
     try:
       if self.tables: #process table based on status
-        [Sync(self.db, self.cfg, tbl).process() for tbl in self.tables]
+        [Sync(self.db, self.cfg, tbl,tracker).process() for tbl in self.tables]
       else:
         if self.views: # process views based on status
           [Sync(self.db, self.cfg, vw).process() for vw in self.views]
+      logging.info("--timings report--")
+      [logging.info(f"{state:<10}: {secs:8.2f}") for state, secs in tracker.items()]
     except Exception as ex:
       _msg = "Something went wrong in the Synccer"
       logging.error(_msg)
@@ -61,16 +78,21 @@ class Synccer():
 ###########################################################################
 
 class Sync():
-  def __init__(self, db, cfg, lyr):
+  def __init__(self, db, cfg, lyr, tracker):
     self.db = db
     self.cfg = cfg
     self.lyr = lyr
+    self.tracker = tracker
 
   def process(self):
     while self.lyr.status not in (LyrReg.COMPLETE,LyrReg.WAIT) and not self.lyr.err:
       try:
-        logging.debug(F"status: {self.lyr.status.lower()}")
-        getattr(self, self.lyr.status.lower())()
+        startTime = datetime.now() 
+        _status = self.lyr.status.lower() # store this here before it is updated by the process.
+        
+        getattr(self, _status)()
+        
+        self.upTrack(_status, (datetime.now()-startTime).total_seconds(), self.lyr)
       except Exception as ex:
         # logging.error(str(ex))
         logging.error(traceback.format_exc())
@@ -78,7 +100,7 @@ class Sync():
         self.db.execute(*self.lyr.setErr())
 
   def queued(self):
-    logging.info(F"q-ing {self.lyr.identity} -- current({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})")
+    logging.debug(F"q-ing {self.lyr.identity} -- current({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})")
     # get the next dump file from data endpoint
     api = ApiUtils(self.cfg['baseUrl'], self.cfg['api_key'], self.cfg['client_id'])
     _rsp = api.post("data", {"dset":self.lyr.identity,"sup_ver":self.lyr.sup_ver})
@@ -92,26 +114,29 @@ class Sync():
       return
     
     self.db.execute(*self.lyr.upExtraSql({})) # clear the field.
-    logging.debug(F"next: {_next}")
+    # logging.debug(F"next: {_next}")
     self.db.execute(*self.lyr.upExtraSql(_next))
 
-    _supDate = datetime.fromisoformat(_next['sup_date']) if _next['sup_date'] else None # datetime.now()# 
-    logging.info(F" --> next({_next['sup_ver']}:{_next['sup_type']}):{_supDate}")
+    _supDate = datetime.fromisoformat(_next['sup_date']) if _next['sup_date'] else None # always there? Is there an edge case it may still be missing?
+    logging.info(F"q-ing {self.lyr.identity} ({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})-->({_next['sup_ver']}:{_next['sup_type']})")#:{_supDate}
     self.db.execute(*self.lyr.upSupSql(_next['sup_ver'], _next['sup_type'], _supDate))
+    self.db.execute(*self.lyr.delExtraKey('timings')) # reset the timings field.
+    self.db.execute(*self.lyr.upStatusSql(LyrReg.DOWNLOAD))
 
+  def download(self):
+    logging.debug(F" -> download-ing {self.lyr.identity}")
+    if not os.path.exists("temp"): os.makedirs("temp")
+    fPath = f"temp/{self.lyr.extradata['filename']}"
+    ApiUtils.download_file(self.lyr.extradata['s3_url'], fPath)
+    
+    self.db.execute(*self.lyr.delExtraKey('s3_url')) # remove s3_url from extradata as we are done with it now.
     self.db.execute(*self.lyr.upStatusSql(LyrReg.RESTORE))
 
   def restore(self):
-    logging.debug(F" -> restore-ing {self.lyr.identity}")
-    if not os.path.exists("temp"):
-      os.makedirs("temp")
-    # logging.info(f"extradata: {self.lyr.extradata}")
-    fPath = f"temp/{self.lyr.extradata['filename']}"
-    ApiUtils.download_file(self.lyr.extradata['s3_url'], fPath)
-    # restore the file - full loads go straight to each vicmap schema, incs go to the vm_delta schema.
+     # restore the file - full loads go straight to each vicmap schema, incs go to the vm_delta schema.
     # logging.debug(f"restore version: {PGClient(self.db, self.cfg['dbClientPath']).get_restore_version()}") # test pg connection.
+    fPath = f"temp/{self.lyr.extradata['filename']}"
     PGClient(self.db, self.cfg['dbClientPath']).restore_file(fPath)
-    self.db.execute(*self.lyr.upStatusSql(LyrReg.QUEUED))
     
     if self.lyr.sup_type == Supplies.FULL:
       self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))
@@ -177,3 +202,15 @@ class Sync():
     FU.remove(f"temp/{self.lyr.extradata['filename']}")
     # status->COMPLETE or err=true
     self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
+
+  def upTrack(self, status, duration, lyr):
+    # whole of run stats
+    if status not in self.tracker:
+      self.tracker.update({status:duration})
+    else:
+      self.tracker[status] = self.tracker[status] + duration
+    
+    # individual layer stats
+    _timings = lyr.extradata or {}
+    _timings.update({status:duration}) # overwrite
+    lyr.upExtraSql(_timings)

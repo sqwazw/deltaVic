@@ -3,6 +3,7 @@ from datetime import datetime
 
 class DBTable():
   QUEUED="QUEUED"
+  DOWNLOAD="DOWNLOAD"
   RESTORE="RESTORE"
   DELETE="DELETE"
   ADD="ADD"
@@ -64,8 +65,16 @@ class DBTable():
     if isinstance(self.extradata, str): # dodgy fix?
       logging.warn("Extradata was a string, fixing")
       self.extradata = json.loads(self.extradata)
-    # update with the new values or clear if None.
+    # update with the new values or clear the field if None was supplied.
     self.extradata.update(dicty) if dicty else self.extradata.clear()
+    
+    sqlStr = "UPDATE {} SET extradata=%s where identity=%s".format(self.name)
+    sqlParams = (json.dumps(self.extradata), self.identity)
+    return sqlStr, sqlParams
+  
+  def delExtraKey(self, key):
+    if self.extradata and self.extradata.get(key):
+      self.extradata.pop(key)
     
     sqlStr = "UPDATE {} SET extradata=%s where identity=%s".format(self.name)
     sqlParams = (json.dumps(self.extradata), self.identity)

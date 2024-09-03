@@ -1,5 +1,5 @@
 import sys, os, logging, traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dataman import DB, FU, Logger, Configgy, LyrReg
 from vmd import Setup, Synccer
@@ -14,7 +14,7 @@ class vmdelta():
     self.action=vargs[0] if len(vargs) > 0 else "sync" # default
     self.task  =vargs[1] if len(vargs) > 1 else False
     self.thing =vargs[2] if len(vargs) > 2 else False
-    logging.info("initting vmdelta")
+    logging.debug("running deltaVic...")
     self.configgy = Configgy("config.ini")
     self.cfg = self.configgy.cfg[self.STAGE]
     rootLog.level = int(self.cfg['log_level'])
@@ -43,8 +43,15 @@ class vmdelta():
             [FU.remove(f"{dir}{os.sep}{ff}") for ff in files]
         else:
           logging.info("task was not specified")
+      case "scorch":
+        # remove all datasets and empty the layer_registry table
+        _db = DB(self.cfg['dbHost'], self.cfg['dbPort'], self.cfg['dbName'], self.cfg['dbUser'], self.cfg['dbPswd'])
+        for dset in _db.getRecSet(LyrReg):
+          if dset.relation == 'table': _db.dropTable(dset.identity)
+          # if dset.relation == 'view': _db.dropView(dset.identity)
+        _db.truncate("vm_delta.layer_registry")
       case "_":
-        logging.info("action was not specified")
+        logging.info("action was not specified") # default to sync?
     
   # def upload(self):
   #   pass
@@ -52,7 +59,7 @@ class vmdelta():
 
 def main():
   startTime = datetime.now()
-  logging.info(f"Start Time: {startTime}")
+  # logging.info(f"Start Time: {startTime}")
   
   try:
     vmd = vmdelta(sys.argv[1:])
@@ -62,8 +69,9 @@ def main():
     logging.info(traceback.format_exc())
   
   endTime = datetime.now()
-  logging.info(f"End Time: {endTime}")
-  logging.info(f"Time taken: {(endTime - startTime).total_seconds()}")
+  # logging.info(f"End Time: {endTime}")
+  duration = (endTime - startTime).total_seconds()
+  logging.info(f"Duration: {str(timedelta(seconds=duration)).split('.')[0]}")
 
 if __name__ == "__main__":
   main()

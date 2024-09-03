@@ -239,6 +239,14 @@ class DB():
     field_name_list, data, message = self.execute(sqlStr)
     return True if len(data) > 0 else False
 
+  def truncate(self, tblQual:str):
+    try:
+      sqlStr = "TRUNCATE TABLE {}".format(tblQual)
+      self.execute(sqlStr) # don't require return values
+    except Exception as ex:
+        return str(ex)
+    return ""
+    
   def dropTable(self, tblQual:str):
     logging.debug(f"Dropping table {tblQual}")
     self.execute(f"DROP TABLE IF EXISTS {tblQual} CASCADE") # don't require return values
