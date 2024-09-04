@@ -29,6 +29,11 @@ class vmdelta():
         synccer.unWait() # queue any leftover jobs from last time.
         while(synccer.assess()):
           synccer.run()
+      case "status":
+        Setup(self.configgy, self.STAGE).status(self.STAGE)
+      case "core":
+        # set only core vicmap layers
+        Setup(self.configgy, self.STAGE).core()
       # case "upload":
       #   self.upload(self.thing)
       case "clean":

@@ -9,6 +9,26 @@ class Setup():
     self.db = None
     self.dbSchemas = None
 
+  def status(self, stage):
+    logging.info(f"testing config file has all required keys for '{stage}' instance: {self.preReqs()}")
+    logging.info(f"dbCnxn: {self.cfg['dbUser']}:{self.cfg['dbPswd']}@{self.cfg['dbHost']}:{self.cfg['dbPort']}/{self.cfg['dbName']}")
+    logging.info(f"Email: {self.cfg['email']}")
+    logging.info(f"ClientId: {self.cfg['client_id']}")
+    logging.info(f"ApiKey: {self.cfg['api_key']}")
+    logging.info(f"deltaVic endpoint: {self.cfg['baseUrl']}")
+
+    # for key, val in self.cfg.items():
+    #   logging.info(f"{key}: {val}")#, self.cfg['key'])
+  
+  def core(self):
+    self.db = DB(self.cfg['dbHost'], self.cfg['dbPort'], self.cfg['dbName'], self.cfg['dbUser'], self.cfg['dbPswd'])
+    sqlUnretired = "update vm_delta.layer_registry set active=false where identity like 'vlat%' or identity like 'vtt%'"
+    self.db.execute(sqlUnretired)
+    sqlNotMisc = "update vm_delta.layer_registry set active=false where sup='MISC' and not "
+    sqlNotMisc += "(" + ' or '.join(f"identity like '{sch}%'" for sch in ['vmadmin','vmreftab','vmfeat']) + ")"
+    logging.info(sqlNotMisc)
+    # self.db.execute(sqlNotMisc)
+
   def run(self):
     self.preReqs()
     # test connection - exception will be thrown if it is bad
@@ -28,6 +48,7 @@ class Setup():
         raise Exception(f"No {var} in config.ini")
       if not val:
         raise Exception(f"No value for {var} in config.ini")
+    return True
     
   def checkDb_Meta(self):
     # check db is spatial
@@ -55,7 +76,7 @@ class Setup():
   def checkApiClient(self):
     # if the client_id is null, we need to create it
     if not self.cfg.get('client_id'):
-      logging.info("Submissing email address to obtain a client_id")
+      logging.info("Submitting email address to obtain a client_id")
       api = ApiUtils(self.cfg['baseUrl'], None, None)
       rsp = api.post("register", {"email":self.cfg['email']})
       logging.info("Updating config file with client_id...")
