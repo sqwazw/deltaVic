@@ -35,7 +35,7 @@ class Synccer():
     logging.info(f"Layer state: {len(_local)} locally, {len(_errs)} errors, {len(_remote)} from vicmap_master")
 
     # scroll thorugh the remote datasets and add any that don't exist locally
-    logging.info("checking remote layers exist locally")
+    logging.debug("checking remote layers exist locally")
     for name, dset in _remote.items():
       if not (_lyr := _local.get(name) or _errs.get(name)):
       # if name not in list(_local.keys()).extend(list(_errs.keys())):
@@ -43,7 +43,7 @@ class Synccer():
         self.db.execute(*dset.insSql())
 
     # scroll through the local datasets and set to queued if versions don't match
-    logging.info("checking local layers against remote")
+    logging.debug("checking local layers against remote")
     for name,lyr in _local.items():
       if not (_vmLyr := _remote.get(name)):
         logging.warning(f"No version of {name} exists in the vicmap_master") # auto delete? in qa at start/end?
@@ -94,8 +94,8 @@ class Sync():
         
         self.upTrack(_status, (datetime.now()-startTime).total_seconds(), self.lyr)
       except Exception as ex:
-        # logging.error(str(ex))
-        logging.error(traceback.format_exc())
+        logging.error(str(ex))
+        logging.debug(traceback.format_exc())
         self.db.execute(*self.lyr.upExtraSql({"error":str(ex)}))
         self.db.execute(*self.lyr.setErr())
 
@@ -113,14 +113,11 @@ class Sync():
         self.db.execute(*self.lyr.upStatusSql(LyrReg.WAIT))
       return
     
-    self.db.execute(*self.lyr.upExtraSql({})) # clear the field.
-    # logging.debug(F"next: {_next}")
     self.db.execute(*self.lyr.upExtraSql(_next))
 
     _supDate = datetime.fromisoformat(_next['sup_date']) if _next['sup_date'] else None # always there? Is there an edge case it may still be missing?
     logging.info(F"q-ing {self.lyr.identity} ({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})-->({_next['sup_ver']}:{_next['sup_type']})")#:{_supDate}
     self.db.execute(*self.lyr.upSupSql(_next['sup_ver'], _next['sup_type'], _supDate))
-    self.db.execute(*self.lyr.delExtraKey('timings')) # reset the timings field.
     self.db.execute(*self.lyr.upStatusSql(LyrReg.DOWNLOAD))
 
   def download(self):
@@ -166,7 +163,16 @@ class Sync():
     sqlAdd = (f"insert into {self.lyr.identity}"
               f" (select {colsCsv} from {_delta} where operation='INSERT')")
     self.db.execute(sqlAdd)
-    self.db.analVac(self.lyr.identity) # clean up since dels and adds have completed.
+    # self.db.analVac(self.lyr.identity) # clean up since dels and adds have completed.
+    # self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))
+    self.db.execute(*self.lyr.upStatusSql(LyrReg.ANALYZE))
+
+  def analyze(self):
+    self.db.execute(f"analyze {self.lyr.identity}")
+    self.db.execute(*self.lyr.upStatusSql(LyrReg.VACUUM))
+
+  def vacuum(self):
+    self.db.execute(f"vacuum {self.lyr.identity}")
     self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))
 
   def reconcile(self):
@@ -211,6 +217,8 @@ class Sync():
       self.tracker[status] = self.tracker[status] + duration
     
     # individual layer stats
-    _timings = lyr.extradata or {}
-    _timings.update({status:duration}) # overwrite
-    lyr.upExtraSql(_timings)
+    tms = 'timings-full' if lyr.sup_type==Supplies.FULL else 'timings-inc' 
+    _tms = lyr.extradata[tms] if tms in lyr.extradata else {}
+    _tms.update({status:duration}) # overwrite
+    self.db.execute(*lyr.upExtraSql({tms:_tms}))
+    
