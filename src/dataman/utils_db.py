@@ -236,8 +236,8 @@ class DB():
   def table_exists(self, tblQual:str):
     """ Check table or view exists """        
     sqlStr = "SELECT table_name FROM information_schema.tables WHERE table_schema||'.'||table_name = '{}'".format(tblQual)
-    field_name_list, data, message = self.execute(sqlStr)
-    return True if len(data) > 0 else False
+    table = self.item(sqlStr)
+    return True if table else False # if len(data) > 0
 
   def truncate(self, tblQual:str):
     try:

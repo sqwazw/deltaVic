@@ -6,6 +6,7 @@ from vmd import Setup, Synccer
 
 rootLog = Logger().get()
 # rootLog.level = logging.DEBUG
+# NOTSET=0, DEBUG=10, INFO=20, WARN=30, ERROR=40, CRITICAL=50
 
 class vmdelta():
   STAGE='dev'
@@ -17,7 +18,9 @@ class vmdelta():
     logging.debug("running deltaVic...")
     self.configgy = Configgy("config.ini")
     self.cfg = self.configgy.cfg[self.STAGE]
+    # logging.info(f"setting log level to {int(self.cfg['log_level'])}")
     rootLog.level = int(self.cfg['log_level'])
+    # logging.info(rootLog.level) # not working??
 
   def run(self):
     match self.action:
@@ -29,6 +32,7 @@ class vmdelta():
         synccer.unWait() # queue any leftover jobs from last time.
         while(synccer.assess()):
           synccer.run()
+          # break
       case "status":
         Setup(self.configgy, self.STAGE).status(self.STAGE)
       case "core":
@@ -41,8 +45,9 @@ class vmdelta():
           _db = DB(self.cfg['dbHost'], self.cfg['dbPort'], self.cfg['dbName'], self.cfg['dbUser'], self.cfg['dbPswd'])
           logging.info("Analysing and Vaccuuming...")
           for dset in _db.getRecSet(LyrReg):
-            logging.info(f"...{dset.identity}")
-            _db.analVac(dset.identity)
+            if _db.table_exists(dset.identity):
+              # logging.info(f"...{dset.identity}")
+              _db.analVac(dset.identity)
         elif self.task == "files": # remove any leftover files in temp
           for dir, subdir, files in os.walk('temp'):
             [FU.remove(f"{dir}{os.sep}{ff}") for ff in files]

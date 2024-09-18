@@ -6,6 +6,8 @@ from dataman import LyrReg, ApiUtils, PGClient, Supplies, FU
 ###########################################################################
 
 class Synccer():
+  haltStates = [LyrReg.COMPLETE,LyrReg.WAIT] # ,LyrReg.OPS
+
   def __init__(self, cfg, db):
     self.cfg = cfg
     self.db = db
@@ -18,9 +20,10 @@ class Synccer():
 
   def assess(self):
     self.resolve() # updates out of date datasets to 'QUEUED'
-    _layers = [ll for ll in self.db.getRecSet(LyrReg) if ll.active and not ll.err and ll.status not in (LyrReg.COMPLETE,LyrReg.WAIT)]
+    _layers = [ll for ll in self.db.getRecSet(LyrReg) if ll.active and not ll.err and ll.status not in self.haltStates]
     self.tables = [ll for ll in _layers if ll.relation=='table']
-    # self.tables = [tt for tt in self.tables if tt.identity.startswith('vmreftab')]#[0:1] # use to dither candidates.
+    # self.tables = [tt for tt in self.tables if tt.identity.startswith('vmtrans.tr_road')]#[0:1] # use to dither candidates.
+    # self.tables.sort(key=lambda ll:ll.extradata.get('row_count') if 'row_count' in ll.extradata else 0, reverse=True)
     self.views = [ll for ll in _layers if ll.relation=='view']
     
     if _nmbr := len(self.tables) + len(self.views):
@@ -40,6 +43,7 @@ class Synccer():
       if not (_lyr := _local.get(name) or _errs.get(name)):
       # if name not in list(_local.keys()).extend(list(_errs.keys())):
         dset.sup_ver=-1 # new record gets a negative supply-id so it matches the latest seed.
+        dset.sup_type=Supplies.FULL # seed is full.
         self.db.execute(*dset.insSql())
 
     # scroll through the local datasets and set to queued if versions don't match
@@ -64,10 +68,10 @@ class Synccer():
     tracker = {}#{"queued":0,"download":0,"restore":0,"delete":0,"add":0,"reconcile":0,"clean":0}
     try:
       if self.tables: #process table based on status
-        [Sync(self.db, self.cfg, tbl,tracker).process() for tbl in self.tables]
+        [Sync(self.db, self.cfg, tbl, self.haltStates,tracker).process() for tbl in self.tables]
       else:
         if self.views: # process views based on status
-          [Sync(self.db, self.cfg, vw).process() for vw in self.views]
+          [Sync(self.db, self.cfg, vw, self.haltStates,tracker).process() for vw in self.views]
       logging.info("--timings report--")
       [logging.info(f"{state:<10}: {secs:8.2f}") for state, secs in tracker.items()]
     except Exception as ex:
@@ -76,16 +80,23 @@ class Synccer():
       raise Exception(_msg)
     
 ###########################################################################
+                     ### y   y N    N CCCCC
+                     #   y   y NN   N C
+                     ###  y y  N N  N C
+                       #   y   N  N N C
+                     ###   y   N   NN CCCCC
+###########################################################################
 
 class Sync():
-  def __init__(self, db, cfg, lyr, tracker):
+  def __init__(self, db, cfg, lyr, haltStates, tracker):
     self.db = db
     self.cfg = cfg
     self.lyr = lyr
+    self.halt = haltStates
     self.tracker = tracker
 
   def process(self):
-    while self.lyr.status not in (LyrReg.COMPLETE,LyrReg.WAIT) and not self.lyr.err:
+    while self.lyr.status not in self.halt and not self.lyr.err:
       try:
         startTime = datetime.now() 
         _status = self.lyr.status.lower() # store this here before it is updated by the process.
@@ -101,6 +112,8 @@ class Sync():
 
   def queued(self):
     logging.debug(F"q-ing {self.lyr.identity} -- current({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})")
+    self.db.execute(*self.lyr.delExtraKey('error')) # clear the err for a new run
+    
     # get the next dump file from data endpoint
     api = ApiUtils(self.cfg['baseUrl'], self.cfg['api_key'], self.cfg['client_id'])
     _rsp = api.post("data", {"dset":self.lyr.identity,"sup_ver":self.lyr.sup_ver})
@@ -138,41 +151,26 @@ class Sync():
     if self.lyr.sup_type == Supplies.FULL:
       self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))
     else:
-      self.db.execute(*self.lyr.upStatusSql(LyrReg.DELETE))
-    
-  def delete(self):
-    # apply the deletes -> add()
+      self.db.execute(*self.lyr.upStatusSql(LyrReg.OPS))#DELETE
+  
+  def ops(self): # maintains idempotency if you are doing reRunFromState.
     logging.debug(f" -> Deleting rows for {self.lyr.identity}")
     _delta = self.lyr.extradata['filename'].replace('.dmp','')
-    sqlDel = (f"delete from {self.lyr.identity} where {self.lyr.pkey} in"
-              f" (select {self.lyr.pkey} from {_delta} where operation='DELETE')")
-    self.db.execute(sqlDel)
-    self.db.execute(*self.lyr.upStatusSql(LyrReg.ADD))
+    self.db.execute(f"delete from {self.lyr.identity} where {self.lyr.pkey} in (select {self.lyr.pkey} from {_delta})")
 
-  def add(self):
-    # delete the adds in case of a rerun, (idempotency), then add the adds again -> reconcile()
     logging.debug(f" -> Adding rows for {self.lyr.identity}")
-    #pre-add-del -> cleans up before a rerun. Can just do whole inc table in the DELETE above.
-    _delta = self.lyr.extradata['filename'].replace('.dmp','')
-    sqlDel = (f"delete from {self.lyr.identity} where {self.lyr.pkey} in"
-              f" (select {self.lyr.pkey} from {_delta} where operation='INSERT')")
-    self.db.execute(sqlDel)
-    #adds
-    logging.debug(f"Adding rows for {self.lyr.identity}")
     colsCsv = ",".join(self.db.getAllCols(self.lyr.identity)) # Get Column names as csv for sql.
-    sqlAdd = (f"insert into {self.lyr.identity}"
-              f" (select {colsCsv} from {_delta} where operation='INSERT')")
-    self.db.execute(sqlAdd)
-    # self.db.analVac(self.lyr.identity) # clean up since dels and adds have completed.
-    # self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))
+    self.db.execute(f"insert into {self.lyr.identity} (select {colsCsv} from {_delta} where operation='INSERT')")
+    
+    self.db.execute(*self.lyr.upStatusSql(LyrReg.VACUUM)) # LyrReg.RECONCILE# LyrReg.ANALYZE ?
+
+  
+  def vacuum(self):
+    self.db.execute(f"vacuum {self.lyr.identity}")
     self.db.execute(*self.lyr.upStatusSql(LyrReg.ANALYZE))
 
   def analyze(self):
     self.db.execute(f"analyze {self.lyr.identity}")
-    self.db.execute(*self.lyr.upStatusSql(LyrReg.VACUUM))
-
-  def vacuum(self):
-    self.db.execute(f"vacuum {self.lyr.identity}")
     self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))
 
   def reconcile(self):
@@ -217,7 +215,7 @@ class Sync():
       self.tracker[status] = self.tracker[status] + duration
     
     # individual layer stats
-    tms = 'timings-full' if lyr.sup_type==Supplies.FULL else 'timings-inc' 
+    tms = 'timings-full' if lyr.sup_type==Supplies.FULL else f'timings-inc-{lyr.sup_ver}' 
     _tms = lyr.extradata[tms] if tms in lyr.extradata else {}
     _tms.update({status:duration}) # overwrite
     self.db.execute(*lyr.upExtraSql({tms:_tms}))

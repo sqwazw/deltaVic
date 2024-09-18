@@ -1,6 +1,6 @@
 import logging
 from dataman import DB, ApiUtils
-from dataman import LyrReg
+from dataman import LyrReg, Supplies
 
 class Setup():
   def __init__(self, configgy, stage):
@@ -103,7 +103,8 @@ class Setup():
     _existingKeys = [d.identity for d in self.db.getRecSet(LyrReg)]
     for d in dsets:
       if d.identity not in _existingKeys:
-        d.sup_ver=-1 # new record gets a negative supply-id so it matches the latest seed.
+        d.sup_ver=-1 # new record gets a negative supply-id so it matches on the latest seed.
+        d.sup_type=Supplies.FULL # seed is full.
         self.db.execute(*d.insSql())
 
   def createVicmapSchemas(self):
