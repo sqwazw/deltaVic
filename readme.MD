@@ -3,53 +3,94 @@ This project allows download and sync of the vicmap suite of data products to a 
 Author: Warwick Wilson
 Company: Department of Transport and Planning (Victoria)
 Date: 13/11/23
-Revised: 30/8/24
+Revised: 19/9/24
 
+# Step 0: Prerequisites
 
-Step 1. SETUP
+## deltaVic Git repo
+Clone this repoistory locally to the machine you wish to use.
+I recommend using an IDE such as VS Code to view and make edits to the python workspace.
 
-A. Install Postgres v16 or above from the EDB website and install the spatial extension. 
-   (You can manually install PostGis as the superuser: "CREATE EXTENSION PostGIS;" if needs be.)
-   
-	Create an instance (vicmap?) and a user (vicmap?) with permission to create schemas.
-   eg: log in as the database master and use: 
-	   CREATE ROLE vicmap with PASSWORD 'vicmap' WITH LOGIN;
-      GRANT CREATE ON DATABASE vicmap TO vicmap;
+## Database - PostGIS 16 (or above)
+[Install PostGres](https://www.postgresql.org/download/) v16 or above.
+> If your installer offers, add the spatial extension PostGIS.
 
-	NB: EDB installer uses stack builder to install the new spatial db for you.
-   NB2: Minor cleanup -- You can delete the tiger/tiger_data/topoology schemas.
+It is recommended that you create a secondary instance in your database called 'vicmap' with a user called 'Vicmap' that only has access to the vicmap instance, (so as not to expose the superuser role or admin capabilities to the deltaVic client application.).
 
-	Install a database client such as DBeaver to allow access to the database instance for maintenance.
-	 
-B. Install python version 3.10 or better, pip install the libraries for psycopg2 and requests.
+eg: log in as the postgres database master from the install and use: 
+```
+CREATE EXTENSION PostGIS;
 
-C. Populate the config.ini file with your connection details and your email address.
-   NB: If you are using multiple instances please use the plus extension to your base address.
-	     ie: person@place.com and person+prod@place.com
+CREATE ROLE vicmap with PASSWORD 'vicmap' WITH LOGIN;
+or
+CREATE ROLE vicmap NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT LOGIN NOREPLICATION NOBYPASSRLS PASSWORD 'vicmap';
 
-D. execute the python script with the setup argument
-	 $> deltaVic.py setup
-	 It will intiate a client Id for your email address and place it in your config.ini file
+GRANT CREATE ON DATABASE vicmap TO vicmap;
+```
 
-E. Go to your email and confirm the account so it can be acrtivated.
+> Early testing of deltaVic idenitifed that using an HDD as your postgis data folder is not a good idea and will lead to performanmce degradation. Ensure you have a solid state (SSD) Hard Disk underlying your postgres installation.
+> NB: EDB installer can use a second step called stack builder to install the spatial extension for you.
+> NB2: Minor cleanup -- You can delete the tiger/tiger_data/topoology schemas.
 
-F. run setup a second time.
-	 $> deltaVic.py setup
-	 It will place the default public api-key in the config.ini file.
-	 It will then create the vicmap schemas and populate the table deltavic.layer_registry (511 public layers)
+## Database GUI
+Install a database client to allow access to your local database instance, (for maintenance and configuration.).
+PGAdmin4 generally comes packaged with PostGres, but I would recommend DBeaver.
 
-G. If you do not want all datasets delivered, go to the table created above set active to false.
-   OR, "update vm_delta.layer_registry set active=false where identity like 'vlat%'", then set the ones you want to true.
+## Python 3.10 (or above)
+Install python version 3.10 or better, pip install the libraries for psycopg2 and requests.
+If psycopg2 is unavailable in pip for your python version use psycopg2-binary
 
-Step 2. POPULATE
+# Step 1: SETUP
 
-A. Manually run the comamnd 
-	 $> deltaVic.py sync
-	 It will populate your active layers with downloads from the Vicmap Manager application.
+## Populate your config.ini 
+file with your email address and you database connection details ( dbHost/dbPort/dbName/dbUser/dbPswd ).
+> If you are using multiple instances, you can use the plus extension to your email handle.
+> ie: person@example.com and person+prod@example.com
 
-Step 3. AUTOMATE
+## Execute the setup step
+Exceuting the scripts will depend on how you have configured python on your system, it may look like the following:
+```
+deltaVic setup
+deltaVic.py setup
+python3.12 deltaVic.py setup
+```
+This will request a new client-id for you and place it in your config.ini file, triigering a verification email
 
-A. Queue a cron job or windows scheduler to run every hour with the command:
-	 $> deltaVic.py sync
-	 Please set it for a randome minute duing the hour to spread the load on our servers.
-	 Ensure that the process is not already running when instantiating.
+## Verify the EMail
+> Check your email and confirm the account so it is activated.
+
+## Execute the setup step, again
+Run setup a second time.
+```
+deltaVic.py setup
+```
+> It will place the default public api-key in the config.ini file.
+> It will then create the vicmap schemas and populate the table deltavic.layer_registry table (with 500+ public layers)
+
+## Configure your target datasets
+If you do not want all datasets delivered, use your DB GUI (DBeaver) to go to the layer_registry table and set active flag on each layer to true/false.
+```
+update vm_delta.layer_registry set active=true;
+update vm_delta.layer_registry set active=false;
+update vm_delta.layer_registry set active=true where not (identity like 'vlat%' or identity like 'vtt%');
+update vm_delta.layer_registry set active=true where identity='vmtrans.tr_road';
+update vm_delta.layer_registry set active=true where identity in ('vmadd.address', 'vmprop.centroid');
+update vm_delta.layer_registry set active=true where (identity like 'vlat%') and sup='VLAT';
+update vm_delta.layer_registry set active=true where sup='VLAT'; --VLAT--VTT
+update vm_delta.layer_registry set active=true where not (identity like 'vtt%') and sup='VTT';
+```
+
+# Step 2: POPULATE
+Manually run the comamnd 
+```
+deltaVic.py sync
+```
+It will populate your active layers with downloads from the Vicmap Manager application. Processing time will depend on your internet download speed and choice of storage hardware.
+
+# Step 3: AUTOMATE
+Queue a cron job or windows scheduler to run every hour with the command:
+```
+deltaVic.py sync
+```
+Please set it for a random minute duing the hour to spread the load on our API service.
+Ensure that the process is not already running when instantiating.
