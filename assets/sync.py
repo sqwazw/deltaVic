@@ -1,7 +1,10 @@
 import os, logging, traceback
 from datetime import datetime, timedelta
 
-from dataman import LyrReg, ApiUtils, PGClient, Supplies, FU
+from .utils_db import PGClient
+from .utils_api import ApiUtils
+from .dbTable import LyrReg
+from .utils import FileUtils as FU, Supplies
 
 ###########################################################################
 
@@ -143,7 +146,7 @@ class Sync():
     self.db.execute(*self.lyr.upStatusSql(LyrReg.RESTORE))
 
   def restore(self):
-     # restore the file - full loads go straight to each vicmap schema, incs go to the vm_delta schema.
+    # restore the file - full loads go straight to each vicmap schema, incs go to the vm_delta schema.
     # logging.debug(f"restore version: {PGClient(self.db, self.cfg['dbClientPath']).get_restore_version()}") # test pg connection.
     fPath = f"temp/{self.lyr.extradata['filename']}"
     PGClient(self.db, self.cfg['dbClientPath']).restore_file(fPath)
@@ -173,22 +176,22 @@ class Sync():
     self.db.execute(f"analyze {self.lyr.identity}")
     self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))
 
-  def reconcile(self):
-    logging.debug(F" -> reconcile-ing {self.lyr.identity}")
-    # reconcile the row count and check sum -> signOff()?
+  def reconcile(self): # reconcile the row count and check sum -> signOff()?
     # warning: if table is malformed and missing ufi_created col, it will fail here and not insert stats, which will throw errs when assembling datasets.
     # warning 2, if a datasets does not have a pkey specified it will also failed - need to update the control schema prior to anyone seeding.
+    logging.debug(F" -> reconcile-ing {self.lyr.identity}")
+    recStr = ""
+    
     try: 
       supCount, supChkSum = self.lyr.extradata['row_count'], self.lyr.extradata['check_sum']
-      # logging.debug(f"{supCount} {supChkSum}")
+      logging.debug(f"{supCount} {supChkSum}")
       maxUfiDate, maxUfi, tblCount, tblChkSum = self.db.getTblStats(self.lyr.identity, Supplies.meta(self.lyr.sup).ufiCreateCol, self.lyr.pkey) # , state_query=self.obj.pidUpSql()
-      # logging.debug(f"{tblCount} {tblChkSum}")
+      logging.debug(f"{tblCount} {tblChkSum}")
       
     except Exception as ex:
       logging.warning(f"{self.lyr.identity} did not return stats: {str(ex)}")
       raise Exception(f"Problem getting stats: {str(ex)}")
     
-    recStr = ""
     recStr += f" count(remote:{supCount}!=local:{tblCount})-diff({supCount-tblCount})" if tblCount!=supCount else ""
     recStr += f" chkSum(remote:{supChkSum}!=local:{tblChkSum})-diff({supChkSum-tblChkSum})" if tblChkSum!=supChkSum else ""
     if recStr:

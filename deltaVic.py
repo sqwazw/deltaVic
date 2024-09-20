@@ -1,15 +1,15 @@
 import sys, os, logging, traceback
 from datetime import datetime, timedelta
 
-from dataman import DB, FU, Logger, Configgy, LyrReg
-from vmd import Setup, Synccer
+from assets import DB, FU, Logger, Configgy, LyrReg
+from assets import Setup, Synccer
 
 rootLog = Logger().get()
 # rootLog.level = logging.DEBUG
 # NOTSET=0, DEBUG=10, INFO=20, WARN=30, ERROR=40, CRITICAL=50
 
 class vmdelta():
-  STAGE='dev'
+  STAGE='prd'
 
   def __init__(self, vargs):
     self.action=vargs[0] if len(vargs) > 0 else "sync" # default
@@ -59,7 +59,7 @@ class vmdelta():
         for dset in _db.getRecSet(LyrReg):
           if dset.relation == 'table': _db.dropTable(dset.identity)
           # if dset.relation == 'view': _db.dropView(dset.identity)
-        _db.truncate("vm_delta.layer_registry")
+        _db.truncate("vm_meta.layer_registry")
       case "_":
         logging.info("action was not specified") # default to sync?
     

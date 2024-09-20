@@ -215,7 +215,9 @@ class DB():
   
   def getTblStats(self, tblQual, ufiCreatedCol, pkey):
     _ufiCr = f"max({ufiCreatedCol})" if ufiCreatedCol in self.getAllCols(tblQual) else "now()::timestamp"
-    if pkey=='none':
+    pkeyType = [cType for cName, cType in self.getAllColsDict(tblQual).items() if cName==pkey][0]
+    logging.info(f"pkeyType: {pkeyType}")
+    if pkey=='none' or not pkeyType.startswith('int'):
       sqlStr = f"SELECT {_ufiCr}, 0, COUNT(*), 0 FROM {tblQual}"
     else:
       sqlStr = f"SELECT {_ufiCr}, max({pkey}), COUNT({pkey}), SUM({pkey}) FROM {tblQual}"

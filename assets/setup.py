@@ -1,6 +1,9 @@
 import logging
-from dataman import DB, ApiUtils
-from dataman import LyrReg, Supplies
+
+from .utils_db import DB
+from .utils_api import ApiUtils
+from .dbTable import LyrReg
+from .utils import Supplies
 
 class Setup():
   def __init__(self, configgy, stage):
@@ -22,9 +25,9 @@ class Setup():
   
   def core(self):
     self.db = DB(self.cfg['dbHost'], self.cfg['dbPort'], self.cfg['dbName'], self.cfg['dbUser'], self.cfg['dbPswd'])
-    sqlUnretired = "update vm_delta.layer_registry set active=false where identity like 'vlat%' or identity like 'vtt%'"
+    sqlUnretired = "update vm_meta.layer_registry set active=false where identity like 'vlat%' or identity like 'vtt%'"
     self.db.execute(sqlUnretired)
-    sqlNotMisc = "update vm_delta.layer_registry set active=false where sup='MISC' and not "
+    sqlNotMisc = "update vm_meta.layer_registry set active=false where sup='MISC' and not "
     sqlNotMisc += "(" + ' or '.join(f"identity like '{sch}%'" for sch in ['vmadmin','vmreftab','vmfeat']) + ")"
     logging.info(sqlNotMisc)
     # self.db.execute(sqlNotMisc)
@@ -64,15 +67,17 @@ class Setup():
         
     # get all schemas present
     self.dbSchemas = self.db.getSchemas()
-    # check db has vm_delta schema, if not create and add layer_registry
-    if 'vm_delta' not in self.dbSchemas:
-      self.db.createSch('vm_delta')
-    if 'layer_registry' not in self.db.getTables('vm_delta'):
+    # check db has vm_meta schema, if not create and add layer_registry
+    if 'vm_meta' not in self.dbSchemas:
+      self.db.createSch('vm_meta')
+    if 'layer_registry' not in self.db.getTables('vm_meta'):
       with open('layer_registry.sql', 'r') as file:
         createStmt = file.read()
         # logging.info(f"file: {createStmt}")
         self.db.execute(createStmt)
-  
+    if 'vm_delta' not in self.dbSchemas:
+      self.db.createSch('vm_delta')
+    
   def checkApiClient(self):
     # if the client_id is null, we need to create it
     if not self.cfg.get('client_id'):

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS vm_delta.layer_registry
+CREATE TABLE IF NOT EXISTS vm_meta.layer_registry
 (
   identity varchar(100) PRIMARY KEY,
   active boolean DEFAULT TRUE NOT NULL,

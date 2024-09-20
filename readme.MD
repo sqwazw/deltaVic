@@ -8,21 +8,21 @@ Revised: 19/9/24
 # Prerequisites
 
 ## deltaVic Git repo
-Clone this repoistory locally to the machine you wish to use.
+Clone this repository locally to the machine you wish to use.
 I recommend using an IDE such as VS Code to view and make edits to the python workspace.
 
 ## Install/Configure Database - PostGIS 16 (or above)
 [Install PostGres](https://www.postgresql.org/download/) v16 or above.
 > If your installer offers, add the spatial extension PostGIS.
 
-It is recommended that you create a secondary instance in your database called 'vicmap' with a user called 'Vicmap' that only has access to the vicmap instance, (so as not to expose the superuser role or admin capabilities to the deltaVic client application.).
+It is recommended that you create a secondary instance in your database called 'vicmap' with a user called 'vicmap' that only has access to the vicmap instance, (so as not to expose the superuser role or admin capabilities to the deltaVic client application.).
 
-eg: log in as the postgres database master from the install and use: 
+eg: log in as the **postgres** database master (set up during install) and use: 
 ```
 CREATE EXTENSION PostGIS;
 
 CREATE ROLE vicmap with PASSWORD 'vicmap' WITH LOGIN;
-or
+or;
 CREATE ROLE vicmap NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT LOGIN NOREPLICATION NOBYPASSRLS PASSWORD 'vicmap';
 
 GRANT CREATE ON DATABASE vicmap TO vicmap;
@@ -36,7 +36,7 @@ GRANT CREATE ON DATABASE vicmap TO vicmap;
 
 ## Database GUI
 Install a database client to allow access to your local database instance, (for maintenance and configuration.).
-PGAdmin4 generally comes packaged with PostGres, but I would recommend DBeaver.
+PGAdmin4 generally comes packaged with PostGres, but I would recommend [installing DBeaver](https://dbeaver.io/download/).
 
 ## Python 3.10 (or above)
 [Install python](https://www.python.org/downloads/) version 3.10 or better, (3.12 recommended) 
@@ -81,14 +81,14 @@ deltaVic.py setup
 ## Configure your target datasets
 If you do not want all datasets delivered, use your DB GUI (DBeaver) to go to the layer_registry table and set active flag on each layer to true/false.
 ```
-update vm_delta.layer_registry set active=true;
-update vm_delta.layer_registry set active=false;
-update vm_delta.layer_registry set active=true where not (identity like 'vlat%' or identity like 'vtt%');
-update vm_delta.layer_registry set active=true where identity='vmtrans.tr_road';
-update vm_delta.layer_registry set active=true where identity in ('vmadd.address', 'vmprop.centroid');
-update vm_delta.layer_registry set active=true where (identity like 'vlat%') and sup='VLAT';
-update vm_delta.layer_registry set active=true where sup='VLAT'; --VLAT--VTT
-update vm_delta.layer_registry set active=true where not (identity like 'vtt%') and sup='VTT';
+update vm_meta.layer_registry set active=true;
+update vm_meta.layer_registry set active=false;
+update vm_meta.layer_registry set active=true where not (identity like 'vlat%' or identity like 'vtt%');
+update vm_meta.layer_registry set active=true where identity='vmtrans.tr_road';
+update vm_meta.layer_registry set active=true where identity in ('vmadd.address', 'vmprop.centroid');
+update vm_meta.layer_registry set active=true where (identity like 'vlat%') and sup='VLAT';
+update vm_meta.layer_registry set active=true where sup='VLAT'; --VLAT--VTT
+update vm_meta.layer_registry set active=true where not (identity like 'vtt%') and sup='VTT';
 ```
 
 # Step 2: POPULATE
