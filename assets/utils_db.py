@@ -214,9 +214,11 @@ class DB():
     return data[0][0] if len(data) > 0 else 0
   
   def getTblStats(self, tblQual, ufiCreatedCol, pkey):
-    _ufiCr = f"max({ufiCreatedCol})" if ufiCreatedCol in self.getAllCols(tblQual) else "now()::timestamp"
-    pkeyType = [cType for cName, cType in self.getAllColsDict(tblQual).items() if cName==pkey][0]
-    logging.info(f"pkeyType: {pkeyType}")
+    colsDict = self.getAllColsDict(tblQual)
+    _ufiCr = f"max({ufiCreatedCol})" if ufiCreatedCol in colsDict.keys() else "now()::timestamp"
+    pkeyType = [cType for cName, cType in colsDict.items() if cName==pkey][0]
+    logging.debug(f"pkeyType: {pkeyType}")
+    
     if pkey=='none' or not pkeyType.startswith('int'):
       sqlStr = f"SELECT {_ufiCr}, 0, COUNT(*), 0 FROM {tblQual}"
     else:
