@@ -9,7 +9,7 @@ rootLog = Logger().get()
 # NOTSET=0, DEBUG=10, INFO=20, WARN=30, ERROR=40, CRITICAL=50
 
 class vmdelta():
-  STAGE='prd'
+  STAGE='dev'
 
   def __init__(self, vargs):
     self.action=vargs[0] if len(vargs) > 0 else "sync" # default
@@ -18,10 +18,8 @@ class vmdelta():
     logging.debug("running deltaVic...")
     self.configgy = Configgy("config.ini")
     self.cfg = self.configgy.cfg[self.STAGE]
-    # logging.info(f"setting log level to {int(self.cfg['log_level'])}")
-    rootLog.level = int(self.cfg['log_level'])
-    # logging.info(rootLog.level) # not working??
-
+    logging.getLogger().setLevel(int(self.cfg['log_level']))
+    
   def run(self):
     match self.action:
       case "setup":

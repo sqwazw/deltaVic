@@ -94,13 +94,15 @@ class Logger():
       console_handler.setFormatter(log_formatter)#'%(asctime)s - %(name)s - %(levelname)s - %(message)s'
       _rootLog.addHandler(console_handler)
 
-    logging.getLogger("boto").setLevel(logging.CRITICAL)
-    logging.getLogger("botocore").setLevel(logging.CRITICAL)
-    logging.getLogger("urllib3").setLevel(logging.CRITICAL)
-    logging.getLogger('s3transfer').setLevel(logging.CRITICAL)
+      # formatter = logging.Formatter('%(asctime)s(%(levelname)8s): %(message)s', datefmt='%Y%m%d-%H:%M:%S')
+      logFile = 'deltaVic.log'
+      fh = logging.FileHandler(logFile, 'a' if os.path.exists(logFile) else 'w')
+      fh.setLevel(logging.INFO)
+      fh.setFormatter(log_formatter)
+      _rootLog.addHandler(fh)
 
     return _rootLog
-  
+
 class Configgy():
   def __init__(self, cfgFile):
     self.cfgFile = 'config.ini'
