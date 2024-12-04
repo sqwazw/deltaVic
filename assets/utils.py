@@ -71,8 +71,8 @@ class FileUtils():
     proc = Popen(params, stderr=PIPE, stdout=PIPE)
     stdout, stderr = proc.communicate()
     
-    if _msgStr := stdout.decode():
-      logging.info(f"Command Response:{_msgStr}")
+    if _msgStr := stdout.decode().rstrip():
+      logging.debug(f"Command Response:{_msgStr}")
     if _errStr := stderr.decode():
       logging.error(f"Command Response Error:{_errStr}")
       raise Exception(_errStr)
@@ -85,7 +85,7 @@ class Logger():
     log_formatter = logging.Formatter('%(asctime)s[%(levelname)s]  %(message)s') # - %(name)s -
     _rootLog = logging.getLogger()
     _rootLog.level = logging.INFO
-    try: # on aws the getLOgger command get a handler automatically
+    try: # on aws the getLogger command get a handler automatically
       hdlr = _rootLog.handlers[0]
       hdlr.setFormatter(log_formatter)
     except IndexError: # otherwise we have to make the handler ourselves
@@ -103,21 +103,72 @@ class Logger():
 
     return _rootLog
 
-class Configgy():
-  def __init__(self, cfgFile):
-    self.cfgFile = 'config.ini'
-    self.cfg = configparser.ConfigParser()
-    self.cfg.optionxform = str # keep it case sensitive
-    self.cfg.read(self.cfgFile)
+class Config():
+  def __init__(self, filename, stg):
+    self.cfgFile = filename
+    self.cp = configparser.ConfigParser()
+    self.cp.optionxform = str # keep it case sensitive
+    if not self.cp.read(self.cfgFile):
+      # create file
+      self.cp[stg] = {'name':'deltaVic','log_level':20,'email':'somebody@example.org','baseUrl':'https://0mgxefxoib.execute-api.ap-southeast-2.amazonaws.com/vmmgr/'}
+      # self.cp.add_section('default')
+      self.write()
+    self.setStage(stg)
   def write(self):#, cfg):
     with open(self.cfgFile, 'w') as newCfg:
-      self.cfg.write(newCfg)
-  
+      self.cp.write(newCfg)
+  def append(self):#, cfg):
+    with open(self.cfgFile, 'a') as oldCfg:
+      self.cp.write(oldCfg)
+  def setStage(self, stage):
+    if stage not in self.cp.sections():
+      # self.cp.add_section(stage)
+      self.cp[stage] = {'name':'deltaVic','log_level':20,'email':'somebody@example.org','baseUrl':'https://0mgxefxoib.execute-api.ap-southeast-2.amazonaws.com/vmmgr/'}
+      self.write()
+    self.stg = self.cp[stage]
+  def getStage(self):
+    return self.stg.name
+  def get(self, key):
+    if not self.stg:
+      self.setStage('default')
+    # return self.stg[key] if key in self.keys() else '' # .keys() will return set(keys) from all sections.
+    _val=''
+    try:
+      _val = self.stg[key]
+    except KeyError:
+      pass # _val = ''
+    return _val
+  def set(self, keyValDict):
+    if not self.stg:
+      self.setStage('default')
+    for key,val in keyValDict.items():
+      self.stg[key] = val
+    self.write()#append()?
+  def keys(self):
+    return dict(self.cp.items('default')).keys()
+
+  def keysExist(self, cfg, keyArr):
+    # test vars from config that should exist
+    for var in keyArr:
+      if not (val := cfg.get(var)):
+        raise Exception(f"No {var} in config.ini")
+      if not val:
+        raise Exception(f"No value for {var} in config.ini")
+    return True
+###########################################################################
+
 class Test():
   def __init__(self):
     logging.info("initting test")
-  def cfg(self, cfg):
-    logging.info(self.cfg['email'])
+  def cfg(self):#, cfg):
+    # logging.info(self.cfg['email'])
+    config = Config('config.ini', 'default')
+    print(config.get('dbname'))
+    print(config.get('dbnames'))
+    config.setStage('default')
+    print(config.keys())
+    print(config.getStage())
+
   def db(self, db):
     result = db.item("select count(*) from eisedit.mapindex_100d")
     logging.info(f"result: {result} *")
@@ -128,6 +179,8 @@ class Test():
     logging.info(f" count:{len(result)}\r result: {rows} *")
   def api(self, api):
     api.getDatasets()
+
+###########################################################################
 
 class Supplies(dict):
   # load types
@@ -181,3 +234,8 @@ class Supply_Misc():
   ufiRetireCol = "ufi_retired"
   pfiRetireCol = "pfi_retired"
 
+###########################################################################
+
+if __name__ == '__main__':
+  test = Test()
+  test.cfg()

@@ -86,15 +86,16 @@ class PGClient():
     try:
       _msgStr = FU.run_sub(command_parts)
     except Exception as ex:
-      self.delete_credential()
       raise Exception(str(ex))
+    finally:
+      self.delete_credential()
     
-    self.delete_credential()
     return _msgStr
 
   def restore_file(self, file: str): # used in λ.VML_restore.restore()
     """imports a table from a pgdump file"""
     """pg_restore --host=localhost --port=5432 --dbname=vicmap --username=vicmap --clean --if-exists --no-owner --no-privileges --no-acl --no-security-labels --no-tablespaces  vmreftab.hy_substance_extracted"""
+    # NB: will not drop table if it has a dependant view, resulting in duplicate records.
     command_parts = ["pg_restore"]
     command_parts.extend(self.db.getConnArgs())
     command_parts.extend(["--clean", "--if-exists", "--no-owner", "--no-privileges", "--no-acl", "--no-security-labels", "--no-tablespaces"])
@@ -196,7 +197,10 @@ class DB():
       return [classyObj(row) for row in data] if data else []
   
   def getSchemas(self):
-    schemas = self.rows("select schema_name from information_schema.schemata")
+    sqlStr = "select schema_name from information_schema.schemata" + \
+      " where schema_name not in ('public','tiger','information_schema','pg_catalog')" + \
+      " order by schema_name asc"
+    schemas = self.rows(sqlStr)
     return [sch[0] for sch in schemas] if schemas else []
 
   def createSch(self, sch):

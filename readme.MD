@@ -51,6 +51,8 @@ pip3 install psycopg2
 ```
 > If psycopg2 is unavailable via pip for your python/os version, then use psycopg2-binary
 
+NB: Step 1 has an alternative GUI that can be used to configure the config details. The GUI is now the default action when running deltavic.py.
+
 # Step 1: SETUP
 
 ## Populate your config.ini 
@@ -71,24 +73,24 @@ This will request a new client-id for you via the APIs and place it in your conf
 > Check your email account and confirm deltaVic by clicking the link so it becomes activated on our backend.
 
 ## Execute the setup step, again
-Run setup a second time. Now that the client-id exists and is activated, the database will go ahead to populate the layer_registry tracking table and create the vicmap schemas.
+Run setup a second time. Now that the client-id exists and is activated, the database will go ahead to populate the "vm_meta.data" tracking table and create the vicmap schemas.
 ```
 deltaVic.py setup
 ```
 > It will place the default public api-key in the config.ini file.
-> It will then create the vicmap schemas and populate the table deltavic.layer_registry table (with 500+ public layers)
+> It will then create the vicmap schemas and populate the table vm_meta.data table (with 500+ public layers)
 
 ## Configure your target datasets
-If you do not want all datasets delivered, use your DB GUI (DBeaver) to go to the layer_registry table and set active flag on each layer to true/false.
+If you do not want all datasets delivered, use your DB GUI (DBeaver) to go to the data table and set active flag on each layer to true/false.
 ```
-update vm_meta.layer_registry set active=true;
-update vm_meta.layer_registry set active=false;
-update vm_meta.layer_registry set active=true where not (identity like 'vlat%' or identity like 'vtt%');
-update vm_meta.layer_registry set active=true where identity='vmtrans.tr_road';
-update vm_meta.layer_registry set active=true where identity in ('vmadd.address', 'vmprop.centroid');
-update vm_meta.layer_registry set active=true where (identity like 'vlat%') and sup='VLAT';
-update vm_meta.layer_registry set active=true where sup='VLAT'; --VLAT--VTT
-update vm_meta.layer_registry set active=true where not (identity like 'vtt%') and sup='VTT';
+update vm_meta.data set active=true;
+update vm_meta.data set active=false;
+update vm_meta.data set active=true where not (identity like 'vlat%' or identity like 'vtt%');
+update vm_meta.data set active=true where identity='vmtrans.tr_road';
+update vm_meta.data set active=true where identity in ('vmadd.address', 'vmprop.centroid');
+update vm_meta.data set active=true where (identity like 'vlat%') and sup='VLAT';
+update vm_meta.data set active=true where sup='VLAT'; --VLAT--VTT
+update vm_meta.data set active=true where not (identity like 'vtt%') and sup='VTT';
 ```
 
 # Step 2: POPULATE

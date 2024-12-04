@@ -3,120 +3,153 @@ import logging
 from .utils_db import DB
 from .utils_api import ApiUtils
 from .dbTable import LyrReg
-from .utils import Supplies
+from .utils import Supplies, Config
 
 class Setup():
-  def __init__(self, configgy, stage):
-    self.configgy = configgy # needed for the .write(). self.cfg.meta.write()??
-    self.cfg = configgy.cfg[stage]
+  def __init__(self, stg):
+    self.config = Config('config.ini', stg)
     self.db = None
     self.dbSchemas = None
 
-  def status(self, stage):
-    logging.info(f"testing config file has all required keys for '{stage}' instance: {self.preReqs()}")
-    logging.info(f"dbCnxn: {self.cfg['dbUser']}:{self.cfg['dbPswd']}@{self.cfg['dbHost']}:{self.cfg['dbPort']}/{self.cfg['dbName']}")
-    logging.info(f"Email: {self.cfg['email']}")
-    logging.info(f"ClientId: {self.cfg['client_id']}")
-    logging.info(f"ApiKey: {self.cfg['api_key']}")
-    logging.info(f"deltaVic endpoint: {self.cfg['baseUrl']}")
+  def run(self):
+    qa = QA() # each event will throw an Exception unless it passes
+    
+    # _cfg = Config('config.ini')??
+    cfgVars = ['dbHost','dbPort','dbPort','dbName','dbUser','dbPswd', 'dbClientPath','baseUrl','email']
+    self.cfg.keysExist(self.cfg, cfgVars)
+    
+    # test connection - exception will be thrown if it is bad
+    self.db = DB(self.config.get('dbHost'), self.config.get('dbPort'), 
+                 self.config.get('dbName'), self.config.get('dbUser'), self.config.get('dbPswd'))
+    
+    qa.checkPostGis(self.db)
+    qa.mkDbControl(self.db)
+    qaCode, qaMsg = qa.checkApiClient(self.config)
+    if qaCode < 2:
+      self.logger.error(qaMsg)
+      raise Exception(qaMsg)
+    
+    qa.seedMetaData(self.db, self.config)
+    qa.createVicmapSchemas(self.db)
+
+  def status(self):
+    logging.info(f"testing config file has all required keys for '{self.config.getStage()}' instance: {self.config}")
+    logging.info(f"dbCnxn: {self.config.stg['dbUser']}:{self.config.stg['dbPswd']}@{self.config.stg['dbHost']}:{self.config.stg['dbPort']}/{self.config.stg['dbName']}")
+    logging.info(f"Email: {self.config.stg['email']}")
+    logging.info(f"ClientId: {self.config.stg['client_id']}")
+    logging.info(f"ApiKey: {self.config.stg['api_key']}")
+    logging.info(f"deltaVic endpoint: {self.config.stg['baseUrl']}")
 
     # for key, val in self.cfg.items():
     #   logging.info(f"{key}: {val}")#, self.cfg['key'])
   
   def core(self):
     self.db = DB(self.cfg['dbHost'], self.cfg['dbPort'], self.cfg['dbName'], self.cfg['dbUser'], self.cfg['dbPswd'])
-    sqlUnretired = "update vm_meta.layer_registry set active=false where identity like 'vlat%' or identity like 'vtt%'"
+    sqlUnretired = "update vm_meta.data set active=false where identity like 'vlat%' or identity like 'vtt%'"
     self.db.execute(sqlUnretired)
-    sqlNotMisc = "update vm_meta.layer_registry set active=false where sup='MISC' and not "
+    sqlNotMisc = "update vm_meta.data set active=false where sup='MISC' and not "
     sqlNotMisc += "(" + ' or '.join(f"identity like '{sch}%'" for sch in ['vmadmin','vmreftab','vmfeat']) + ")"
     logging.info(sqlNotMisc)
     # self.db.execute(sqlNotMisc)
-
-  def run(self):
-    self.preReqs()
-    # test connection - exception will be thrown if it is bad
-    self.db = DB(self.cfg['dbHost'], self.cfg['dbPort'], self.cfg['dbName'], self.cfg['dbUser'], self.cfg['dbPswd'])
-    self.checkDb_Meta()
-    self.checkApiClient()
-    self.seedDsets()
-    self.createVicmapSchemas()
-
-  def preReqs(self):
-    # test vars from config that should exist
-    reqCfgVars = ['dbHost','dbPort','dbPort','dbName',
-                  'dbUser','dbPswd', 'dbClientPath',
-                  'baseUrl','email']
-    for var in reqCfgVars:
-      if not (val := self.cfg.get(var)):
-        raise Exception(f"No {var} in config.ini")
-      if not val:
-        raise Exception(f"No value for {var} in config.ini")
-    return True
     
-  def checkDb_Meta(self):
+class QA():
+  def __init__(self):
+    pass
+
+  # @staticmethod
+  # def preReqs(cfg, cfgVars):
+  #   for var in cfgVars:
+  #     if not (val := cfg.get(var)):
+  #       raise Exception(f"No {var} in config.ini")
+  #     if not val:
+  #       raise Exception(f"No value for {var} in config.ini")
+  #   return True
+  
+  @staticmethod
+  def checkPostGis(db):
     # check db is spatial
     try:
-      self.db.execute("SELECT PostGIS_version()")
+      db.execute("SELECT PostGIS_version()")
     except Exception as ex:
-      logging.warning("PostGis has not been installed. Please install it as the database superuser.")
-      # try: # issue, you have to be a superuser to install postgis.
+      logging.warning(f"PostGis has not been installed in the {db.dbname} schema. Please install it as the database superuser.")
+      # try: # issue, you have to be the superuser (postgres) to install postgis.
       #   self.db.execute("CREATE EXTENSION PostGIS")
       # except Exception as ex:
       #   logging.error("Could not install PostGis on DB")
       #   raise ex
-        
-    # get all schemas present
-    self.dbSchemas = self.db.getSchemas()
-    # check db has vm_meta schema, if not create and add layer_registry
-    if 'vm_meta' not in self.dbSchemas:
-      self.db.createSch('vm_meta')
-    if 'layer_registry' not in self.db.getTables('vm_meta'):
-      with open('layer_registry.sql', 'r') as file:
+    
+  @staticmethod
+  def mkDbControl(db):
+    # check db has vm_meta/vm_delta schemas. If not create and add data
+    metaSch = ['vm_meta', 'vm_delta']
+    [db.createSch(sch) for sch in metaSch if sch not in db.getSchemas()]
+    
+    if 'data' not in db.getTables('vm_meta'):
+      with open('data.sql', 'r') as file:
         createStmt = file.read()
-        # logging.info(f"file: {createStmt}")
-        self.db.execute(createStmt)
-    if 'vm_delta' not in self.dbSchemas:
-      self.db.createSch('vm_delta')
+        db.execute(createStmt)
+  
+  @staticmethod
+  def checkApiClient(cfg):
+    if not (_email := cfg.get('email')):
+      return 0, "Email not set in config"
+    elif _email == 'somebody@example.org':
+      return 0, "You cannot register the default email address"
     
-  def checkApiClient(self):
     # if the client_id is null, we need to create it
-    if not self.cfg.get('client_id'):
-      logging.info("Submitting email address to obtain a client_id")
-      api = ApiUtils(self.cfg['baseUrl'], None, None)
-      rsp = api.post("register", {"email":self.cfg['email']})
-      logging.info("Updating config file with client_id...")
-      self.cfg['client_id'] = rsp['client_id']
-      self.configgy.write()#self.cfg)
-      raise Exception(f"No client_id was yet registered, please check your inbox for {self.cfg['email']}")
+    if not (_clientId := cfg.get('client_id')):
+      logging.debug("Submitting email address to obtain a client_id")
+      api = ApiUtils(cfg.get('baseUrl'), None, None) # No client-id passed
+      rsp = api.post("register", {"email":_email})
+      logging.debug("Updating config file with client_id...")
+      _clientId = rsp['client_id']
+      cfg.set({'client_id':_clientId})
+      # cfg['client_id'] = rsp['client_id']
+      # cfg.write()
+      errStr = f"Client_id not yet verified, please check your inbox for {_email}"
+      # raise Exception(errStr)
+      return 1, errStr # unverified
     
-    if not self.cfg.get("api_key"):
+    if not (_apiKey := cfg.get("api_key")):
       logging.info("Submitting client_id to obtain an api-key")
-      api = ApiUtils(self.cfg['baseUrl'], None, self.cfg['client_id'])
-      rsp = api.post("register", {"email":self.cfg['email']})
+      api = ApiUtils(cfg.get('baseUrl'), None, _clientId)
+      rsp = api.post("register", {"email":_email})
       logging.info("Updating config file with api_key...")
-      self.cfg['api_key'] = rsp['api_key']
-      self.configgy.write()
+      # cfg['api_key'] = rsp['api_key']
+      _apiKey = rsp['api_key']
+      cfg.set({'api_key':_apiKey})
+      # cfg.write()
+      # return 2 
 
-  def seedDsets(self):
+    # if all 3 registration attrs are present in config, then return 0?
+    # try and avoind this registration call every time the gui is opened.
+    # return 2, "Registration"
+    logging.debug(f"Submitting register call to obtain rights.")# {cfg.keys()} {cfg.get('baseUrl')}")
+    api = ApiUtils(cfg.get('baseUrl'), _apiKey, _clientId)
+    rsp = api.post("register", {"email":_email})
+    return 2, rsp['rights'] if 'rights' in rsp else "Registration"# "No rights" # all good to go
+      
+  @staticmethod
+  def seedMetaData(db, cfg):
     # get full list of datasets
-    api = ApiUtils(self.cfg['baseUrl'], self.cfg['api_key'], self.cfg['client_id'])
+    api = ApiUtils(cfg.get('baseUrl'), cfg.get('api_key'), cfg.get('client_id'))
     rsp = api.post("data", {})
     dsets = [LyrReg(d) for d in rsp['datasets']]
     logging.info(f"Retrieved {len(rsp)}")
     
     # insert the records that don't exist yet
-    _existingKeys = [d.identity for d in self.db.getRecSet(LyrReg)]
+    _existingKeys = [d.identity for d in db.getRecSet(LyrReg)]
     for d in dsets:
       if d.identity not in _existingKeys:
         d.sup_ver=-1 # new record gets a negative supply-id so it matches on the latest seed.
         d.sup_type=Supplies.FULL # seed is full.
-        self.db.execute(*d.insSql())
+        db.execute(*d.insSql())
 
-  def createVicmapSchemas(self):
+  @staticmethod
+  def createVicmapSchemas(db):
     # check db has all vicmap schemas
-    _dsets = self.db.getRecSet(LyrReg)
+    _dsets = db.getRecSet(LyrReg)
     _schemas = set([d.identity.split('.')[0] for d in _dsets])
     logging.info(_schemas)
-    [self.db.createSch(sch) for sch in _schemas if sch not in self.dbSchemas]
-    
-    
+    [db.createSch(sch) for sch in _schemas if sch not in db.getSchemas()]
+ 

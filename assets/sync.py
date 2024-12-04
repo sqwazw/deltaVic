@@ -11,8 +11,8 @@ from .utils import FileUtils as FU, Supplies
 class Synccer():
   haltStates = [LyrReg.COMPLETE,LyrReg.WAIT] # ,LyrReg.OPS
 
-  def __init__(self, cfg, db):
-    self.cfg = cfg
+  def __init__(self, config, db):
+    self.config = config
     self.db = db
     # self.lyrs = []
     self.tables = []
@@ -53,7 +53,7 @@ class Synccer():
     logging.debug("checking local layers against remote")
     for name,lyr in _local.items():
       if not (_vmLyr := _remote.get(name)):
-        logging.warning(f"No version of {name} exists in the vicmap_master") # auto delete? in qa at start/end?
+        logging.warning(f"Dataset {name} is inactive or doesn't exist in the remote vicmap_master") # auto delete? in qa at start/end?
         continue
       # Note conditions: only compare those datasets present locally as active, in a complete state and not in err.
       if lyr.active and lyr.status == LyrReg.COMPLETE:
@@ -63,7 +63,7 @@ class Synccer():
 
   def getVicmap(self):#seedDsets(self):
     # get full list of datasets
-    api = ApiUtils(self.cfg['baseUrl'], self.cfg['api_key'], self.cfg['client_id'])
+    api = ApiUtils(self.config.get('baseUrl'), self.config.get('api_key'), self.config.get('client_id'))
     rsp = api.post('data', {})
     return [LyrReg(d) for d in rsp['datasets']]
     
@@ -71,16 +71,25 @@ class Synccer():
     tracker = {}#{"queued":0,"download":0,"restore":0,"delete":0,"add":0,"reconcile":0,"clean":0}
     try:
       if self.tables: #process table based on status
-        [Sync(self.db, self.cfg, tbl, self.haltStates,tracker).process() for tbl in self.tables]
+        [Sync(self.db, self.config, tbl, self.haltStates,tracker).process() for tbl in self.tables]
       else:
         if self.views: # process views based on status
-          [Sync(self.db, self.cfg, vw, self.haltStates,tracker).process() for vw in self.views]
+          [Sync(self.db, self.config, vw, self.haltStates,tracker).process() for vw in self.views]
       logging.info("--timings report--")
       [logging.info(f"{state:<10}: {secs:8.2f}") for state, secs in tracker.items()]
     except Exception as ex:
       _msg = "Something went wrong in the Synccer"
       logging.error(_msg)
       raise Exception(_msg)
+  
+  def restore(self, lyrQual):
+    fPath = f"temp/{lyrQual}.dmp"
+    PGClient(self.db, self.config.get('dbClientPath')).restore_file(fPath)
+
+  def dump(self, lyrQual):
+    fPath = f"temp/{lyrQual}.dmp"
+    PGClient(self.db, self.config.get('dbClientPath')).dump_file(lyrQual, fPath)
+
     
 ###########################################################################
                      ### y   y N    N CCCCC
@@ -91,9 +100,9 @@ class Synccer():
 ###########################################################################
 
 class Sync():
-  def __init__(self, db, cfg, lyr, haltStates, tracker):
+  def __init__(self, db, config, lyr, haltStates, tracker):
     self.db = db
-    self.cfg = cfg
+    self.config = config
     self.lyr = lyr
     self.halt = haltStates
     self.tracker = tracker
@@ -118,7 +127,7 @@ class Sync():
     self.db.execute(*self.lyr.delExtraKey('error')) # clear the err for a new run
     
     # get the next dump file from data endpoint
-    api = ApiUtils(self.cfg['baseUrl'], self.cfg['api_key'], self.cfg['client_id'])
+    api = ApiUtils(self.config.get('baseUrl'), self.config.get('api_key'), self.config.get('client_id'))
     _rsp = api.post("data", {"dset":self.lyr.identity,"sup_ver":self.lyr.sup_ver})
     if not (_next := _rsp.get("next")):
       if self.lyr.sup_ver == _rsp.get("sup_ver"): # have the latest already
@@ -147,9 +156,9 @@ class Sync():
 
   def restore(self):
     # restore the file - full loads go straight to each vicmap schema, incs go to the vm_delta schema.
-    # logging.debug(f"restore version: {PGClient(self.db, self.cfg['dbClientPath']).get_restore_version()}") # test pg connection.
+    # logging.debug(f"restore version: {PGClient(self.db, self.config.get('dbClientPath')).get_restore_version()}") # test pg connection.
     fPath = f"temp/{self.lyr.extradata['filename']}"
-    PGClient(self.db, self.cfg['dbClientPath']).restore_file(fPath)
+    PGClient(self.db, self.config.get('dbClientPath')).restore_file(fPath)
     
     if self.lyr.sup_type == Supplies.FULL:
       self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS vm_meta.layer_registry
+CREATE TABLE IF NOT EXISTS vm_meta.data
 (
   identity varchar(100) PRIMARY KEY,
   active boolean DEFAULT TRUE NOT NULL,

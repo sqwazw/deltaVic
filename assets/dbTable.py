@@ -90,7 +90,7 @@ class DBTable():
     return f"select {','.join(cls.cols)} from {cls.name} order by identity"
 
 class LyrReg(DBTable):
-  name='vm_meta.layer_registry'
+  name='vm_meta.data'
   cols=['identity','active','relation','geom_type','pkey','status','err','sup','sup_ver','sup_date','sup_type','md_uuid','extradata','edit_date']
   
   def __init__(self, lyrObj):
